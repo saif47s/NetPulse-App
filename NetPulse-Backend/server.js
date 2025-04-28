@@ -1,5 +1,6 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
+const nmap = require('node-nmap');
 const app = express();
 
 app.use(express.json());
@@ -17,6 +18,32 @@ app.get('/devices', async (req, res) => {
   const { data, error } = await supabase.from('devices').select('*');
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// Scan network
+app.get('/scan', async (req, res) => {
+  try {
+    const scan = new nmap.QuickScan('192.168.1.0/24'); // Replace with your network range
+    scan.on('complete', async (data) => {
+      const devices = data.map(device => ({
+        name: device.hostname || 'Unknown',
+        ip: device.ip,
+        status: 'active'
+      }));
+
+      // Save to Supabase
+      const { error } = await supabase.from('devices').insert(devices);
+      if (error) return res.status(500).json({ error: error.message });
+
+      res.json({ message: 'Scan complete', devices });
+    });
+    scan.on('error', (error) => {
+      res.status(500).json({ error: error.toString() });
+    });
+    scan.startScan();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const PORT = 3000;
