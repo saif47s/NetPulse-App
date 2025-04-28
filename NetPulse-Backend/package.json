@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
     "express": "^5.1.0",
-    "mongoose": "^8.14.0"
+    "mongoose": "^8.14.0",
+    "node-nmap": "^4.0.0"
   }
 }
