@@ -1,9 +1,19 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, Button, TextInput } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { StyleSheet, Text, View, FlatList, Button, TextInput, ActivityIndicator, Alert, Platform } from 'react-native';
 import axios from 'axios';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import PushNotification from 'react-native-push-notification';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 // Define interface for device
 interface Device {
@@ -20,23 +30,60 @@ function HomeScreen({ navigation }) {
   const [scheduleIp, setScheduleIp] = useState('');
   const [cronTime, setCronTime] = useState('0 20 * * *');
   const [action, setAction] = useState('pause');
+  const notificationListener = useRef();
+  const responseListener = useRef();
+
+  useEffect(() => {
+    // Request permissions
+    async function requestPermissions() {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Error', 'Notification permissions not granted');
+      }
+    }
+    requestPermissions();
+
+    // Handle notifications
+    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+      console.log('NOTIFICATION:', notification);
+    });
+
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('RESPONSE:', response);
+    });
+
+    return () => {
+      Notifications.removeNotificationSubscription(notificationListener.current);
+      Notifications.removeNotificationSubscription(responseListener.current);
+    };
+  }, []);
 
   const fetchDevices = async () => {
     try {
+      setLoading(true);
       const response = await axios.get('http://192.168.1.14:3000/devices');
       setDevices(response.data);
     } catch (error) {
-      console.error('Error fetching devices:', error);
+      Alert.alert('Error', 'Failed to fetch devices');
+    } finally {
+      setLoading(false);
     }
   };
 
   const scanNetwork = async () => {
-    setLoading(true);
     try {
+      setLoading(true);
       await axios.get('http://192.168.1.14:3000/scan');
       await fetchDevices();
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'NetPulse',
+          body: 'Network scan completed',
+        },
+        trigger: null,
+      });
     } catch (error) {
-      console.error('Error scanning network:', error);
+      Alert.alert('Error', 'Failed to scan network');
     } finally {
       setLoading(false);
     }
@@ -46,11 +93,15 @@ function HomeScreen({ navigation }) {
     try {
       await axios.post('http://192.168.1.14:3000/pause', { ip });
       await fetchDevices();
-      PushNotification.localNotification({
-        message: `Internet paused for ${ip}`,
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'NetPulse',
+          body: `Internet paused for ${ip}`,
+        },
+        trigger: null,
       });
     } catch (error) {
-      console.error('Error pausing device:', error);
+      Alert.alert('Error', 'Failed to pause device');
     }
   };
 
@@ -58,11 +109,15 @@ function HomeScreen({ navigation }) {
     try {
       await axios.post('http://192.168.1.14:3000/unpause', { ip });
       await fetchDevices();
-      PushNotification.localNotification({
-        message: `Internet unpaused for ${ip}`,
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'NetPulse',
+          body: `Internet unpaused for ${ip}`,
+        },
+        trigger: null,
       });
     } catch (error) {
-      console.error('Error unpausing device:', error);
+      Alert.alert('Error', 'Failed to unpause device');
     }
   };
 
@@ -73,21 +128,51 @@ function HomeScreen({ navigation }) {
         action,
         cron_time: cronTime,
       });
-      PushNotification.localNotification({
-        message: `Scheduled ${action} for ${scheduleIp} at ${cronTime}`,
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'NetPulse',
+          body: `Scheduled ${action} for ${scheduleIp} at ${cronTime}`,
+        },
+        trigger: null,
       });
+      setScheduleIp('');
+      setCronTime('0 20 * * *');
+      setAction('pause');
     } catch (error) {
-      console.error('Error scheduling:', error);
+      Alert.alert('Error', 'Failed to schedule action');
     }
   };
 
+  // Check device status periodically
   useEffect(() => {
     fetchDevices();
-  }, []);
+    const interval = setInterval(async () => {
+      for (const device of devices) {
+        try {
+          const response = await axios.get(`http://192.168.1.14:3000/status/${device.ip}`);
+          if (response.data.status !== device.status && response.data.status !== 'paused') {
+            await supabase.from('devices').update({ status: response.data.status }).eq('ip', device.ip);
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'NetPulse',
+                body: `Device ${device.ip} is now ${response.data.status}`,
+              },
+              trigger: null,
+            });
+            fetchDevices();
+          }
+        } catch (error) {
+          console.error('Error checking status:', error);
+        }
+      }
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [devices]);
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>NetPulse Devices</Text>
+      {loading && <ActivityIndicator size="large" color="#0000ff" />}
       <Button title={loading ? 'Scanning...' : 'Scan Network'} onPress={scanNetwork} disabled={loading} />
       <FlatList
         data={devices}
@@ -142,20 +227,25 @@ function HomeScreen({ navigation }) {
 function DetailsScreen({ route }) {
   const { ip } = route.params;
   const [details, setDetails] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchDetails = async () => {
       try {
+        setLoading(true);
         const response = await axios.get(`http://192.168.1.14:3000/device/${ip}`);
         setDetails(response.data);
       } catch (error) {
-        console.error('Error fetching device details:', error);
+        Alert.alert('Error', 'Failed to fetch device details');
+      } finally {
+        setLoading(false);
       }
     };
     fetchDetails();
   }, [ip]);
 
-  if (!details) return <Text>Loading...</Text>;
+  if (loading) return <ActivityIndicator size="large" color="#0000ff" />;
+  if (!details) return <Text>No details available</Text>;
 
   return (
     <View style={styles.container}>
@@ -175,8 +265,8 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Details" component={DetailsScreen} />
+        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'NetPulse' }} />
+        <Stack.Screen name="Details" component={DetailsScreen} options={{ title: 'Device Details' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
