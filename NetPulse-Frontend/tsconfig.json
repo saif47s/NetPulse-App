@@ -10,7 +10,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
-    "types": ["react", "react-native", "react-native-vector-icons", "axios"],
-    "typeRoots": ["./node_modules/@types", "./types"]
+    "types": ["react", "react-native", "react-native-vector-icons", "axios"]
   }
 }

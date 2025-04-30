@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, FlatList, Button, TextInput, ActivityIndicator, Alert, Platform, TouchableOpacity } from 'react-native';
-import axios from 'axios';
+import { StyleSheet, Text, View, FlatList, Button, TextInput, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
+import axios, { AxiosResponse } from 'axios';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import * as Notifications from 'expo-notifications';
 import { Subscription } from 'expo-notifications';
-import Constants from 'expo-constants';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createClient, AuthSession } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
+import { config } from 'dotenv';
+config();
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -22,8 +23,11 @@ Notifications.setNotificationHandler({
 });
 
 // Supabase client
-const supabaseUrl = 'https://wjnstfgsrwgctcbwhtnh.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndqbnN0ZmdzcndnY3RjYndodG5oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU2NTIzNjksImV4cCI6MjA2MTIyODM2OX0.Ti4J_roZnLMhF6PTvSbVU4AM1hQcauSQ3C5iwo1djJg';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Supabase URL or Key is missing. Please set them in your environment variables.');
+}
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Default backend URL
@@ -147,7 +151,7 @@ function HomeScreen({ navigation }: { navigation: StackNavigationProp<RootStackP
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${backendUrl}/devices`);
+      const response: AxiosResponse<Device[]> = await axios.get(`${backendUrl}/devices`);
       setDevices(response.data);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to fetch devices. Check backend URL or network.');
@@ -253,8 +257,9 @@ function HomeScreen({ navigation }: { navigation: StackNavigationProp<RootStackP
       setScheduleIp('');
       setCronTime('0 20 * * *');
       setAction('pause');
+      Alert.alert('Success', 'Action scheduled successfully.');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to schedule action. Check inputs and backend URL.');
+      Alert.alert('Error', error.message || 'Failed to schedule action.');
     } finally {
       setLoading(false);
     }
@@ -266,7 +271,7 @@ function HomeScreen({ navigation }: { navigation: StackNavigationProp<RootStackP
     const interval = setInterval(async () => {
       if (devices.length === 0) return;
       try {
-        const responses = await Promise.all(
+        const responses: AxiosResponse<{ status: string }>[] = await Promise.all(
           devices.map((device: Device) => axios.get(`${backendUrl}/status/${device.ip}`))
         );
         for (let i = 0; i < devices.length; i++) {
@@ -378,7 +383,7 @@ function DetailsScreen({ route }: { route: RouteProp<RootStackParamList, 'Detail
     const fetchDetails = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${backendUrl}/device/${ip}`);
+        const response: AxiosResponse<DeviceDetails> = await axios.get(`${backendUrl}/details/${ip}`);
         setDetails(response.data);
       } catch (error: any) {
         Alert.alert('Error', error.message || 'Failed to fetch device details. Check backend URL.');
@@ -396,11 +401,11 @@ function DetailsScreen({ route }: { route: RouteProp<RootStackParamList, 'Detail
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Device Details</Text>
       <View style={styles.detailsContainer}>
-        <Text style={styles.detailText}><Icon name="info" size="18" color="#0288d1" /> IP: {details.ip}</Text>
-        <Text style={styles.detailText}><Icon name="dns" size="18" color="#0288d1" /> Hostname: {details.hostname}</Text>
-        <Text style={styles.detailText}><Icon name="fingerprint" size="18" color="#0288d1" /> MAC: {details.mac}</Text>
-        <Text style={styles.detailText}><Icon name="business" size="18" color="#0288d1" /> Vendor: {details.vendor}</Text>
-        <Text style={styles.detailText}><Icon name="computer" size="18" color="#0288d1" /> OS: {details.os}</Text>
+        <Text style={styles.detailText}><Icon name="info" size={18} color="#0288d1" /> IP: {details.ip}</Text>
+        <Text style={styles.detailText}><Icon name="dns" size={18} color="#0288d1" /> Hostname: {details.hostname}</Text>
+        <Text style={styles.detailText}><Icon name="fingerprint" size={18} color="#0288d1" /> MAC: {details.mac}</Text>
+        <Text style={styles.detailText}><Icon name="business" size={18} color="#0288d1" /> Vendor: {details.vendor}</Text>
+        <Text style={styles.detailText}><Icon name="computer" size={18} color="#0288d1" /> OS: {details.os}</Text>
       </View>
     </SafeAreaView>
   );
@@ -409,14 +414,14 @@ function DetailsScreen({ route }: { route: RouteProp<RootStackParamList, 'Detail
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function App() {
-  const [session, setSession] = useState<AuthSession | null>(null);
+  const [session, setSession] = useState<any>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
       setSession(session);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: AuthSession | null) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
       setSession(session);
     });
 
@@ -426,6 +431,7 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator
+        initialRouteName="Login"
         screenOptions={{
           headerStyle: { backgroundColor: '#0288d1' },
           headerTintColor: '#fff',
